@@ -1,6 +1,7 @@
 ﻿using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.S3.Transfer;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,7 +13,6 @@ namespace Amazon.DocSamples.S3
     class UploadFileMPULowLevelAPITest
     {
         private static string bucketName = "";
-        private static string keyName = "";
         private static readonly RegionEndpoint bucketRegion = RegionEndpoint.EUWest2;
         private static IAmazonS3 s3Client;
         static int noOfFiles;
@@ -21,109 +21,58 @@ namespace Amazon.DocSamples.S3
         {
             RedText("*Make sure to provide AWS profile in the APP.config file* \n");
 
-            string s3File = "";
+            
             Console.WriteLine("Input Bucket Name");
             bucketName = Console.ReadLine();
 
-            Console.WriteLine("Provide a name for the uploaded object");
-            keyName = Console.ReadLine();
-
             // Retrieves the number of files to upload and the relevant file paths 
-            List<string> s3FileToUpload = new List<string>();
-            s3FileToUpload.AddRange(FilePath());
+            List<string> filePathToUpload = new List<string>();
+            filePathToUpload.AddRange(FilePath());
 
             // Loops until no files to upload are left
-            for (int i = 0; i < s3FileToUpload.Count; i++)
+            for (int i = 0; i < filePathToUpload.Count; i++)
             {
-                s3File = s3FileToUpload[i];
+                var filePath = filePathToUpload[i];
 
                 s3Client = new AmazonS3Client(bucketRegion);
                 Console.WriteLine("Uploading an object");
-                UploadObjectAsync(s3File).Wait();
+                UploadFileAsync(filePath).Wait();
             }
 
            
         }
 
-        private static async Task UploadObjectAsync(string s3File)
+        private static async Task UploadFileAsync(string filePath)
         {
-            // Create list to store upload part responses.
-            List<UploadPartResponse> uploadResponses = new List<UploadPartResponse>();
-
-            // Setup information required to initiate the multipart upload.
-            InitiateMultipartUploadRequest initiateRequest = new InitiateMultipartUploadRequest
-            {
-                BucketName = bucketName,
-                Key = keyName
-            };
-
-            // Initiate the upload.
-            InitiateMultipartUploadResponse initResponse =
-                await s3Client.InitiateMultipartUploadAsync(initiateRequest);
-
-            // Upload parts.
-            long contentLength = new FileInfo(s3File).Length;
-            long partSize = 1048576;
-
             try
             {
-                Console.WriteLine("Uploading parts");
+                var fileTransferUtility =
+                    new TransferUtility(s3Client);
 
-                long filePosition = 0;
-                for (int i = 1; filePosition < contentLength; i++)
-                {
-                    UploadPartRequest uploadRequest = new UploadPartRequest
-                    {
-                        BucketName = bucketName,
-                        Key = keyName,
-                        UploadId = initResponse.UploadId,
-                        PartNumber = i,
-                        PartSize = partSize,
-                        FilePosition = filePosition,
-                        FilePath = s3File
-                    };
-
-                    // Track upload progress.
-                    uploadRequest.StreamTransferProgress +=
-                        new EventHandler<StreamTransferProgressArgs>(UploadPartProgressEventCallback);
-
-                    // Upload a part and add the response to our list.
-                    uploadResponses.Add(await s3Client.UploadPartAsync(uploadRequest));
-
-                    filePosition += partSize;
-                }
-
-                // Setup to complete the upload.
-                CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest
+                // Option 4. Specify advanced settings.
+                var fileTransferUtilityRequest = new TransferUtilityUploadRequest
                 {
                     BucketName = bucketName,
-                    Key = keyName,
-                    UploadId = initResponse.UploadId
+                    FilePath = filePath,
+                    StorageClass = S3StorageClass.Glacier,
+                    PartSize = 1048576
+                    
                 };
-                completeRequest.AddPartETags(uploadResponses);
+                fileTransferUtilityRequest.Metadata.Add("param1", "Value1");
+                fileTransferUtilityRequest.Metadata.Add("param2", "Value2");
 
-                // Complete the upload.
-                CompleteMultipartUploadResponse completeUploadResponse =
-                    await s3Client.CompleteMultipartUploadAsync(completeRequest);
+                await fileTransferUtility.UploadAsync(fileTransferUtilityRequest);
+                Console.WriteLine("Upload 4 completed");
             }
-            catch (Exception exception)
+            catch (AmazonS3Exception e)
             {
-                Console.WriteLine("An AmazonS3Exception was thrown: { 0}", exception.Message);
-
-                // Abort the upload.
-                AbortMultipartUploadRequest abortMPURequest = new AbortMultipartUploadRequest
-                {
-                    BucketName = bucketName,
-                    Key = keyName,
-                    UploadId = initResponse.UploadId
-                };
-                await s3Client.AbortMultipartUploadAsync(abortMPURequest);
+                Console.WriteLine("Error encountered on server. Message:'{0}' when writing an object", e.Message);
             }
-        }
-        public static void UploadPartProgressEventCallback(object sender, StreamTransferProgressArgs e)
-        {
-            // Process event. 
-            Console.WriteLine("{0}/{1}", e.TransferredBytes, e.TotalBytes);
+            catch (Exception e)
+            {
+                Console.WriteLine("Unknown encountered on server. Message:'{0}' when writing an object", e.Message);
+            }
+
         }
         public static List<String> FilePath()
         {
