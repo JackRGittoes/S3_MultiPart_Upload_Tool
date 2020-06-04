@@ -1,135 +1,130 @@
-﻿using System;
+﻿using Amazon.Runtime;
+using Amazon.S3;
+using Amazon.S3.Model;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.IO;
-using Amazon.Glacier;
-using Amazon.Glacier.Model;
-using Amazon.Runtime;
-using Amazon;
+using System.Linq;
+using System.Threading.Tasks;
 
-namespace MultipartUploadTool
+namespace Amazon.DocSamples.S3
 {
-    public class Program
+    class UploadFileMPULowLevelAPITest
     {
-        // Global Variables
-        static string vaultName = "";
-        static readonly long partSize = 1048576; // 100MB 
-        static string ArchiveDescription = "";
-        static string profileName = "";
-        static string archiveFile = "";
+        private static string bucketName = "";
+        private static string keyName = "";
+        private static readonly RegionEndpoint bucketRegion = RegionEndpoint.EUWest2;
+        private static IAmazonS3 s3Client;
         static int noOfFiles;
-        static int uploadAttempt = 1;
 
-        public static void Main(string[] args)
+        public static void Main()
         {
-            RedText("*BEFORE YOU CAN START, YOU NEED TO CREATE A PROFILE* \n");
-            profileName = RegisterProfile();
+            RedText("*Make sure to provide AWS profile in the APP.config file* \n");
 
-            // Sets the region 
-            string region = SetRegion();
+            string s3File = "";
+            Console.WriteLine("Input Bucket Name");
+            bucketName = Console.ReadLine();
 
-            // Name of AWS Vault
-            Console.WriteLine("\n Input Vault Name");
-            vaultName = Console.ReadLine();
-
-            // Upload description for the archive
-            Console.WriteLine("\n Input Archive Description");
-            ArchiveDescription = Console.ReadLine();
+            Console.WriteLine("Provide a name for the uploaded object");
+            keyName = Console.ReadLine();
 
             // Retrieves the number of files to upload and the relevant file paths 
-            List<string> archiveToUpload = new List<string>();
-            archiveToUpload.AddRange(FilePath());
+            List<string> s3FileToUpload = new List<string>();
+            s3FileToUpload.AddRange(FilePath());
 
             // Loops until no files to upload are left
-            for (int i = 0; i < archiveToUpload.Count; i++)
+            for (int i = 0; i < s3FileToUpload.Count; i++)
             {
-                archiveFile = archiveToUpload[i];
+                s3File = s3FileToUpload[i];
 
-                /* Passes In AWS Profile
-                 * And the archive file path */
-                AmazonGlacierClient(profileName, archiveFile, region);
-
+                s3Client = new AmazonS3Client(bucketRegion);
+                Console.WriteLine("Uploading an object");
+                UploadObjectAsync(s3File).Wait();
             }
 
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Make sure to save the Archive ID");
-            Console.ForegroundColor = ConsoleColor.White;
-
-            Console.WriteLine("\n Press Enter to exit");
-            Console.ReadLine();
-
+           
         }
 
-        // Method to create a profile for AWS Credentials
-        public static string RegisterProfile()
+        private static async Task UploadObjectAsync(string s3File)
         {
-            Console.WriteLine("Input Profile Name");
-            string profileName = Console.ReadLine();
-            Console.WriteLine("Input Access Key");
-            string accessKeyId = Console.ReadLine();
-            Console.WriteLine("Input Secret Key");
-            string secretKey = Console.ReadLine();
+            // Create list to store upload part responses.
+            List<UploadPartResponse> uploadResponses = new List<UploadPartResponse>();
 
-            // Registers profile using the Access Key and the Secret Key which is then stored to the profileName 
-            Amazon.Util.ProfileManager.RegisterProfile(profileName, accessKeyId, secretKey);
-            return profileName;
-        }
+            // Setup information required to initiate the multipart upload.
+            InitiateMultipartUploadRequest initiateRequest = new InitiateMultipartUploadRequest
+            {
+                BucketName = bucketName,
+                Key = keyName
+            };
 
-        public static void AmazonGlacierClient(string profileName, string archiveToUpload, string region)
-        {
-            AmazonGlacierClient client;
-            List<string> partChecksumList = new List<string>();
-            var credentials = new StoredProfileAWSCredentials(profileName); // AWS Profile
-            var newRegion = RegionEndpoint.GetBySystemName(region);
+            // Initiate the upload.
+            InitiateMultipartUploadResponse initResponse =
+                await s3Client.InitiateMultipartUploadAsync(initiateRequest);
+
+            // Upload parts.
+            long contentLength = new FileInfo(s3File).Length;
+            long partSize = 1048576;
+
             try
             {
-                // Connects to Amazon Glacier using your credentials and the specified region 
-                using (client = new AmazonGlacierClient(credentials, newRegion))
-                {
+                Console.WriteLine("Uploading parts");
 
-                    Console.WriteLine("Uploading an archive. \n");
-                    string uploadId = InitiateMultipartUpload(client, vaultName);
-                    partChecksumList = UploadParts(uploadId, client, archiveToUpload);
-                    string archiveId = CompleteMPU(uploadId, client, partChecksumList, archiveToUpload);
-                    Console.WriteLine("Archive ID: {0}", archiveId);
+                long filePosition = 0;
+                for (int i = 1; filePosition < contentLength; i++)
+                {
+                    UploadPartRequest uploadRequest = new UploadPartRequest
+                    {
+                        BucketName = bucketName,
+                        Key = keyName,
+                        UploadId = initResponse.UploadId,
+                        PartNumber = i,
+                        PartSize = partSize,
+                        FilePosition = filePosition,
+                        FilePath = s3File
+                    };
+
+                    // Track upload progress.
+                    uploadRequest.StreamTransferProgress +=
+                        new EventHandler<StreamTransferProgressArgs>(UploadPartProgressEventCallback);
+
+                    // Upload a part and add the response to our list.
+                    uploadResponses.Add(await s3Client.UploadPartAsync(uploadRequest));
+
+                    filePosition += partSize;
                 }
 
-                Console.WriteLine("Operation was successful.");
+                // Setup to complete the upload.
+                CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest
+                {
+                    BucketName = bucketName,
+                    Key = keyName,
+                    UploadId = initResponse.UploadId
+                };
+                completeRequest.AddPartETags(uploadResponses);
 
+                // Complete the upload.
+                CompleteMultipartUploadResponse completeUploadResponse =
+                    await s3Client.CompleteMultipartUploadAsync(completeRequest);
             }
-
-            // If Glacier times out it will re attempt the upload 5 times
-            catch (RequestTimeoutException)
+            catch (Exception exception)
             {
-                uploadAttempt = +1;
-                Console.WriteLine("Glacier Timed out while receiving the upload \n Upload Attempt " + uploadAttempt + " / 5");
+                Console.WriteLine("An AmazonS3Exception was thrown: { 0}", exception.Message);
 
-                Console.WriteLine(" Upload Attempt " + uploadAttempt + " / 5");
-                if (uploadAttempt < 5)
+                // Abort the upload.
+                AbortMultipartUploadRequest abortMPURequest = new AbortMultipartUploadRequest
                 {
-
-                    uploadAttempt++;
-                    AmazonGlacierClient(profileName, archiveToUpload, region);
-                }
-                else
-                {
-                    Console.WriteLine("\n Glacier timed out 5 times while receiving the upload. \n Please Restart the program and try again.");
-                    Console.ReadLine();
-                    System.Environment.Exit(1);
-
-                }
+                    BucketName = bucketName,
+                    Key = keyName,
+                    UploadId = initResponse.UploadId
+                };
+                await s3Client.AbortMultipartUploadAsync(abortMPURequest);
             }
-
-            catch (AmazonGlacierException e)
-            {
-                Console.WriteLine(e.Message);
-            }
-
-            catch (AmazonServiceException e) { Console.WriteLine(e.Message); }
-            catch (Exception e) { Console.WriteLine(e.Message); }
-
         }
-
+        public static void UploadPartProgressEventCallback(object sender, StreamTransferProgressArgs e)
+        {
+            // Process event. 
+            Console.WriteLine("{0}/{1}", e.TransferredBytes, e.TotalBytes);
+        }
         public static List<String> FilePath()
         {
             List<string> filePaths = new List<string>();
@@ -182,95 +177,6 @@ namespace MultipartUploadTool
             }
             return filePaths;
         }
-
-        static string InitiateMultipartUpload(AmazonGlacierClient client, string vaultName)
-        {
-            InitiateMultipartUploadRequest initiateMPUrequest = new InitiateMultipartUploadRequest()
-            {
-
-                VaultName = vaultName,
-                PartSize = partSize,
-                ArchiveDescription = ArchiveDescription
-            };
-
-            InitiateMultipartUploadResponse initiateMPUresponse = client.InitiateMultipartUpload(initiateMPUrequest);
-
-            return initiateMPUresponse.UploadId;
-        }
-
-        static List<string> UploadParts(string uploadID, AmazonGlacierClient client, string archiveToUpload)
-        {
-            List<string> partChecksumList = new List<string>();
-            long currentPosition = 0;
-            var buffer = new byte[Convert.ToInt32(partSize)];
-
-            long fileLength = new FileInfo(archiveToUpload).Length;
-            using (FileStream fileToUpload = new FileStream(archiveToUpload, FileMode.Open, FileAccess.Read))
-            {
-                while (fileToUpload.Position < fileLength)
-                {
-                    Stream uploadPartStream = GlacierUtils.CreatePartStream(fileToUpload, partSize);
-                    string checksum = TreeHashGenerator.CalculateTreeHash(uploadPartStream);
-                    partChecksumList.Add(checksum);
-
-                    UploadMultipartPartRequest uploadMPUrequest = new UploadMultipartPartRequest()
-                    {
-
-                        VaultName = vaultName,
-                        Body = uploadPartStream,
-                        Checksum = checksum,
-                        UploadId = uploadID
-                    };
-                    uploadMPUrequest.SetRange(currentPosition, currentPosition + uploadPartStream.Length - 1);
-                    client.UploadMultipartPart(uploadMPUrequest);
-
-                    currentPosition = currentPosition + uploadPartStream.Length;
-                }
-            }
-            return partChecksumList;
-        }
-
-        static string CompleteMPU(string uploadID, AmazonGlacierClient client, List<string> partChecksumList, string archiveToUpload)
-        {
-            long fileLength = new FileInfo(archiveToUpload).Length;
-            CompleteMultipartUploadRequest completeMPUrequest = new CompleteMultipartUploadRequest()
-            {
-                UploadId = uploadID,
-                ArchiveSize = fileLength.ToString(),
-                Checksum = TreeHashGenerator.CalculateTreeHash(partChecksumList),
-                VaultName = vaultName
-            };
-
-            CompleteMultipartUploadResponse completeMPUresponse = client.CompleteMultipartUpload(completeMPUrequest);
-            return completeMPUresponse.ArchiveId;
-        }
-
-        public static string SetRegion()
-        {
-            string[] availableRegions = { "us-east-2", "us-east-1", "us-west-1", "us-west-2", "af-south-1", "ap-east-1", "ap-south-1", "ap-northeast-3", "ap-northeast-2",
-            "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-south-1", "eu-west-3", "eu-north-1",
-            "me-south-1", "sa-east-1"};
-
-            string region = "";
-            bool invalid = true;
-            while (invalid)
-            {
-                Console.WriteLine("Which Region would you like to upload the archive to (e.g. US-West-2)");
-                region = Console.ReadLine();
-
-                if (availableRegions.Contains(region.ToLower()))
-                {
-                    invalid = false;
-                }
-                else
-                {
-                    RedText("Invalid Region");
-                    invalid = true;
-                }
-            }
-            return region;
-        }
-
         public static string RedText(string text)
         {
             Console.ForegroundColor = ConsoleColor.Red;
@@ -279,5 +185,8 @@ namespace MultipartUploadTool
 
             return text;
         }
+
+       
+
     }
 }
