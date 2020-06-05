@@ -29,17 +29,23 @@ namespace Amazon.DocSamples.S3
             List<string> filePathToUpload = new List<string>();
             filePathToUpload.AddRange(FilePath());
 
+            var fileNumber = 1;
             // Loops until no files to upload are left
             for (int i = 0; i < filePathToUpload.Count; i++)
             {
                 var filePath = filePathToUpload[i];
-
+                
                 s3Client = new AmazonS3Client(bucketRegion);
-                Console.WriteLine("Uploading an object");
+                Console.WriteLine("Uploading file " + fileNumber++);
+                
                 UploadFileAsync(filePath).Wait();
-            }
 
-           
+
+            }
+            Console.WriteLine("All Files Uploaded ");
+            Console.ReadLine();
+
+
         }
 
         private static async Task UploadFileAsync(string filePath)
@@ -62,7 +68,9 @@ namespace Amazon.DocSamples.S3
                 fileTransferUtilityRequest.Metadata.Add("param2", "Value2");
 
                 await fileTransferUtility.UploadAsync(fileTransferUtilityRequest);
-                Console.WriteLine("Upload 4 completed");
+                Console.WriteLine("Upload  completed");
+                
+                
             }
             catch (AmazonS3Exception e)
             {
