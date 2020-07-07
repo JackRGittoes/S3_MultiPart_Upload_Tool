@@ -61,11 +61,12 @@ namespace Amazon.DocSamples.S3
                     BucketName = bucketName,
                     FilePath = filePath,
                     StorageClass = S3StorageClass.Glacier,
-                    PartSize = 1048576
-                    
+                    PartSize = 134217728
+
                 };
-                fileTransferUtilityRequest.Metadata.Add("param1", "Value1");
-                fileTransferUtilityRequest.Metadata.Add("param2", "Value2");
+                // This is MetaData for use on AWS. You can remove or add these depending on whether you need them or not.
+                //fileTransferUtilityRequest.Metadata.Add("param1", "Value1");
+                //fileTransferUtilityRequest.Metadata.Add("param2", "Value2");
 
                 await fileTransferUtility.UploadAsync(fileTransferUtilityRequest);
                 Console.WriteLine("Upload  completed");
