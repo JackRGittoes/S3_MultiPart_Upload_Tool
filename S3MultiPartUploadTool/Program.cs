@@ -1,29 +1,26 @@
-﻿using Amazon.Runtime;
+﻿using Amazon;
 using Amazon.S3;
-using Amazon.S3.Model;
 using Amazon.S3.Transfer;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
 
-namespace Amazon.DocSamples.S3
+namespace Program
 {
-    class UploadFileMPULowLevelAPITest
+    class Program
     {
-        private static string bucketName = "";
         private static readonly RegionEndpoint bucketRegion = RegionEndpoint.EUWest2;
         private static IAmazonS3 s3Client;
-        static int noOfFiles;
+       
 
         public static void Main()
         {
-            RedText("*Make sure to provide AWS profile in the APP.config file* \n");
+            RedText("*Make sure to set your AWS Profile name to default in the credentials file* \n");
 
             
             Console.WriteLine("Input Bucket Name");
-            bucketName = Console.ReadLine();
+            var bucketName = Console.ReadLine();
 
             // Retrieves the number of files to upload and the relevant file paths 
             List<string> filePathToUpload = new List<string>();
@@ -38,17 +35,17 @@ namespace Amazon.DocSamples.S3
                 s3Client = new AmazonS3Client(bucketRegion);
                 Console.WriteLine("Uploading file " + fileNumber++);
                 
-                UploadFileAsync(filePath).Wait();
+                UploadFileAsync(filePath, bucketName).Wait();
 
 
             }
-            Console.WriteLine("All Files Uploaded ");
+            Console.WriteLine("All Files Successfully Uploaded ");
             Console.ReadLine();
 
 
         }
 
-        private static async Task UploadFileAsync(string filePath)
+        private static async Task UploadFileAsync(string filePath,  string bucketName)
         {
             try
             {
@@ -61,15 +58,17 @@ namespace Amazon.DocSamples.S3
                     BucketName = bucketName,
                     FilePath = filePath,
                     StorageClass = S3StorageClass.Glacier,
+                    // Part sizes need to be in powers of 2 
                     PartSize = 134217728
 
                 };
+
                 // This is MetaData for use on AWS. You can remove or add these depending on whether you need them or not.
                 //fileTransferUtilityRequest.Metadata.Add("param1", "Value1");
                 //fileTransferUtilityRequest.Metadata.Add("param2", "Value2");
 
                 await fileTransferUtility.UploadAsync(fileTransferUtilityRequest);
-                Console.WriteLine("Upload  completed");
+                Console.WriteLine("Upload completed");
                 
                 
             }
@@ -83,10 +82,13 @@ namespace Amazon.DocSamples.S3
             }
 
         }
+
+        // Requests the number of files to upload
+        // Requests the file path of each file
         public static List<String> FilePath()
         {
             List<string> filePaths = new List<string>();
-
+            var noOfFiles = 0;
             // Loop to stop incorrect datatype exception 
             bool input = true;
             while (input)
@@ -103,7 +105,7 @@ namespace Amazon.DocSamples.S3
                 }
                 catch (Exception)
                 {
-                    Console.WriteLine("Invalid Input");
+                    RedText("Invalid Input");
                 }
             }
 
@@ -133,8 +135,11 @@ namespace Amazon.DocSamples.S3
                 }
 
             }
+           
             return filePaths;
         }
+
+        // Presents important messages in red text
         public static string RedText(string text)
         {
             Console.ForegroundColor = ConsoleColor.Red;
