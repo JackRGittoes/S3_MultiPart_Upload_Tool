@@ -52,11 +52,12 @@ namespace Program
                 var fileTransferUtility =
                     new TransferUtility(s3Client);
 
-                // Option 4. Specify advanced settings.
+                
                 var fileTransferUtilityRequest = new TransferUtilityUploadRequest
                 {
                     BucketName = bucketName,
                     FilePath = filePath,
+                    // You need to change the storage class depending on where you want the file to be stored on AWS
                     StorageClass = S3StorageClass.Glacier,
                     // Part sizes need to be in powers of 2 
                     PartSize = 134217728
@@ -148,8 +149,5 @@ namespace Program
 
             return text;
         }
-
-       
-
     }
 }
